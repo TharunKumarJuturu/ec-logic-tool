@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import re
-import itertools
+import time 
 
 # --- Configuration & Global Paths ---
 st.set_page_config(
@@ -19,37 +19,22 @@ NOM_CF_COL = 'Nom CF /\nNom CO PLM (CF_CO)'
 # --- Helper Functions ---
 
 def strict_clean_input(text):
-    # 1. Force spaces around parentheses to ensure they are treated as separate tokens
-    text = text.replace('(', ' ( ').replace(')', ' ) ')
-    
-    # 2. Standardize operators
     text = re.sub(r'\s+and\s+', ' AND ', text, flags=re.IGNORECASE)
     text = re.sub(r'\s+or\s+', ' OR ', text, flags=re.IGNORECASE)
-    
     parts = []
-    # Split by whitespace to get clean tokens
-    tokens = text.split()
-    
-    # 3. Strict Regex: 3 Letters + Underscore + DIGITS (e.g., AYR_01)
-    # This avoids matching descriptions like "OPTION_TURN" which have letters after underscore
-    code_extractor = re.compile(r'([A-Z]{3}_\d+)', re.IGNORECASE)
+    tokens = re.findall(r'(\(|\)|\S+)', text)
+    code_extractor = re.compile(r'([A-Z]{3}_[A-Z0-9]+)', re.IGNORECASE)
 
     for token in tokens:
-        # Keep structure
-        if token.upper() in ('AND', 'OR', '(', ')'):
-            parts.append(token.upper())
+        if token in ('AND', 'OR', '(', ')'):
+            parts.append(token)
             continue
-        
-        # Search for valid code pattern
         match = code_extractor.search(token)
         if match:
             parts.append(match.group(1).upper()) 
             
-    # Reassemble string
     cleaned_string = ' '.join(parts)
     cleaned_string = cleaned_string.replace('( ', '(').replace(' )', ')')
-    
-    # Remove leading operators if any
     cleaned_string = cleaned_string.strip()
     if cleaned_string.startswith("AND "):
         cleaned_string = cleaned_string[4:]
@@ -92,17 +77,19 @@ def generate_combinations(logic_string):
 
         final_lines = []
         for group in or_groups:
-            # Use the same strict regex for consistency
-            codes = re.findall(r'[A-Z]{3}_\d+', group, re.IGNORECASE)
+            codes = re.findall(r'[A-Z]{3}_[A-Z0-9]+', group)
             if codes:
                 codes = sorted(list(set(codes))) 
-                combination_line = "|".join([c.upper() for c in codes])
+                combination_line = "|".join(codes)
                 final_lines.append(combination_line)
         return "\n".join(final_lines)
     except Exception as e:
         return f"Error: {e}"
 
 def get_validation_data(combinations_str, results_list):
+    """
+    Validates combinations and returns detailed data for display and filtering.
+    """
     if not combinations_str or not results_list:
         return []
 
@@ -123,6 +110,7 @@ def get_validation_data(combinations_str, results_list):
             if str(data.get('CDPO', 'N')).strip().upper() != 'Y':
                 is_cdpo = False
         
+        # Determine status
         suffix = ""
         is_valid_for_final = False
         
@@ -142,8 +130,7 @@ def get_validation_data(combinations_str, results_list):
         validation_data.append({
             "raw_line": line,
             "display_text": f"{line}{suffix}",
-            "is_valid": is_valid_for_final,
-            "is_valid_dpeo_only": (is_dpeo and not is_cdpo)
+            "is_valid": is_valid_for_final
         })
         
     return validation_data
@@ -153,7 +140,9 @@ def add_new_request():
     st.session_state['comparison_results'] = None
 
 def process_requests():
+    # --- Interactive Toasts ---
     msg = st.toast('Analyzing inputs...', icon='⏳')
+    time.sleep(0.3)
     
     input_list = st.session_state.request_fields
     df = st.session_state['extracted_data']
@@ -162,11 +151,11 @@ def process_requests():
         st.session_state.comparison_results = {'error': 'Extraction data is empty. Please upload the file first.'}
         return
 
+    msg.toast('Matching against database...', icon='🔍')
+    
     df['__COMPARE__'] = df[NOM_CF_COL].astype(str).str.strip().str.lower().apply(lambda x: re.sub(r'[^\w]', '', x))
     all_raw_input_text = " ".join(input_list)
-    
-    # Use Strict Regex to find codes in the raw input for database matching
-    all_codes_in_input = re.findall(r'([A-Z]{3}_\d+)', all_raw_input_text, re.IGNORECASE)
+    all_codes_in_input = re.findall(r'([A-Z]{3}_[A-Z0-9]+)', all_raw_input_text, re.IGNORECASE)
     
     matched_data = {} 
     
@@ -237,30 +226,51 @@ def extract_ec_data_callback():
 # --- Initialization ---
 initialize_session()
 
-# --- MODERN UI STYLING ---
+# --- MODERN UI STYLING (Soft UI) ---
 st.markdown("""
 <style>
-    .stApp { background-color: #f0f2f6; }
+    /* Global Background */
+    .stApp { background-color: #f8f9fa; }
+    
+    /* Card Style */
     .css-card {
-        background-color: white; padding: 30px; border-radius: 15px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px;
+        background-color: white;
+        padding: 2rem;
+        border-radius: 12px;
+        border: 1px solid #e0e0e0;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        margin-bottom: 1.5rem;
+        transition: border-color 0.2s ease;
     }
+    .css-card:hover { border-color: #008080; }
+
+    /* Text Area */
     .stTextArea textarea {
-        background-color: #f9f9f9; border: 1px solid #e0e0e0; border-radius: 8px;
-        font-family: 'Consolas', 'Courier New', monospace; font-size: 14px;
+        background-color: #ffffff; 
+        border: 1px solid #d1d5db; 
+        border-radius: 8px;
+        font-family: 'Consolas', 'Courier New', monospace; 
+        font-size: 14px;
     }
+    .stTextArea textarea:focus { border-color: #008080; box-shadow: 0 0 0 1px #008080; }
+
+    /* Buttons */
     .stButton > button {
-        background-color: #008080; color: white; border-radius: 8px; font-weight: 600;
+        background-color: #008080; color: white; border-radius: 8px; 
+        font-weight: 600; border: none; padding: 0.5rem 1rem;
     }
+    .stButton > button:hover { background-color: #006666; }
+
+    /* Add Button */
     div[data-testid="stVerticalBlock"] > div > div:nth-child(2) > div > button {
         margin-top: 32px; background-color: #4CAF50; width: 42px; height: 42px;
         border-radius: 50%; font-size: 1.5rem; line-height: 1; padding: 0;
     }
-    .stFileUploader { border: 2px dashed #008080; border-radius: 10px; background-color: #e6fffa; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-    th { background-color: #008080; color: white; padding: 12px 15px; text-align: left; }
-    td { background-color: white; color: #333; padding: 12px 15px; border-bottom: 1px solid #f0f0f0; }
-    tr:nth-child(even) td { background-color: #f9f9f9; }
+
+    /* Sidebar */
+    .stFileUploader { 
+        border: 2px dashed #008080; border-radius: 10px; background-color: #f0fdfa; padding: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -309,7 +319,7 @@ with tab1:
     # --- Results Display with TABS ---
     if st.session_state.processed_requests is not None and not st.session_state['extracted_data'].empty:
         
-        # --- Summary Metrics ---
+        # Summary Metrics
         results_list = st.session_state.comparison_results
         if isinstance(results_list, list):
             valid_req_count = len([r for r in st.session_state.processed_requests if r.strip() != ''])
@@ -354,6 +364,7 @@ with tab1:
                             st.markdown("**Generated Combinations:**")
                             st.code(generated_combinations, language="text")
 
+                        # --- 1. Display Combination Validation (Badge Style) ---
                         st.markdown("**Combination Validation:**")
                         if validation_data:
                             html_badges = '<div style="font-family: monospace; white-space: pre; line-height: 1.6;">'
@@ -372,11 +383,13 @@ with tab1:
                         else:
                             st.info("No combinations to validate.")
 
+                        # --- 2. Display Final Combination (Filtered) ---
+                        # UPDATED LOGIC: Include if valid (DPEO, CDPO, or Both)
                         st.markdown("**Final Combination:**")
                         final_lines = [
                             item['raw_line'] 
                             for item in validation_data 
-                            if item['is_valid'] and not item['is_valid_dpeo_only']
+                            if item['is_valid']
                         ]
                         
                         col_text, col_dl = st.columns([0.85, 0.15])
@@ -392,8 +405,9 @@ with tab1:
                                     mime="text/plain"
                                 )
                         else:
-                            st.info("No valid combinations found (All lines were NOT APPLICABLE or DPEO only).")
+                            st.info("No valid combinations found (All lines were NOT APPLICABLE).")
 
+                        # --- Matched Codes Table ---
                         codes_in_this_input = {code.upper() for code in re.findall(r'([A-Z]{3}_\d+)', raw_input, re.IGNORECASE)}
                         df_group = pd.DataFrame([
                             res for res in results_list 
