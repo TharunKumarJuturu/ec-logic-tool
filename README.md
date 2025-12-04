@@ -1,6 +1,6 @@
 # ec-logic-tool
 
-Based on our conversation history and the code we have built together, here is the current format and logic that the application understands and implements:
+here is the current format and logic that the application understands and implements:
 
 1. The Input Format 📝
 The application expects you to enter complex logical strings into the "Dynamic Request Input" text areas (REQ - 1, REQ - 2, etc.).
