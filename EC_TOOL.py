@@ -19,33 +19,65 @@ NOM_CF_COL = 'Nom CF /\nNom CO PLM (CF_CO)'
 # --- Helper Functions ---
 
 def strict_clean_input(text):
-    text = re.sub(r'\s+and\s+', ' AND ', text, flags=re.IGNORECASE)
-    text = re.sub(r'\s+or\s+', ' OR ', text, flags=re.IGNORECASE)
-    parts = []
-    tokens = re.findall(r'(\(|\)|\S+)', text)
-    code_extractor = re.compile(r'([A-Z]{3}_[A-Z0-9]+)', re.IGNORECASE)
-
-    for token in tokens:
-        if token in ('AND', 'OR', '(', ')'):
-            parts.append(token)
-            continue
-        match = code_extractor.search(token)
-        if match:
-            parts.append(match.group(1).upper()) 
+    """
+    Applies strict filtering rules:
+    1. Starts processing from the first '('.
+    2. Extracts codes (XXX_NN), brackets, commas, and logic operators.
+    3. Converts ',' -> 'OR'.
+    4. Normalizes to uppercase AND/OR.
+    """
+    # 1. Start from the first open bracket '('
+    start_index = text.find('(')
+    if start_index == -1:
+        # If no bracket is found, return empty or handle as error depending on preference
+        # For now, we return empty string to indicate no valid logic found
+        return ""
+    
+    # Slice the text to ignore "garbage" before the first bracket
+    content_to_process = text[start_index:]
+    
+    # 2. Define Regex Patterns based on roles
+    # Codes: 3 alphanumeric chars + '_' + 2 digits (e.g., ABC_12, k1k_00)
+    # Operators: (, ), , (comma), AND, OR (case insensitive)
+    pattern = r"([a-zA-Z0-9]{3}_\d{2}|[()]|,|(?i:\b(?:and|or)\b))"
+    
+    matches = re.findall(pattern, content_to_process)
+    
+    cleaned_tokens = []
+    for token in matches:
+        token_lower = token.lower()
+        
+        # 3. Convert ',' -> 'OR'
+        if token == ',':
+            cleaned_tokens.append('OR')
+        
+        # Normalize Logic operators
+        elif token_lower == 'or':
+            cleaned_tokens.append('OR')
+        elif token_lower == 'and':
+            cleaned_tokens.append('AND')
+        
+        # Keep Brackets
+        elif token in ('(', ')'):
+            cleaned_tokens.append(token)
             
-    cleaned_string = ' '.join(parts)
-    cleaned_string = cleaned_string.replace('( ', '(').replace(' )', ')')
-    cleaned_string = cleaned_string.strip()
-    if cleaned_string.startswith("AND "):
-        cleaned_string = cleaned_string[4:]
-    elif cleaned_string.startswith("OR "):
-        cleaned_string = cleaned_string[3:]
+        # Keep Codes (Normalize to Uppercase for consistency with Excel matching)
+        else:
+            cleaned_tokens.append(token.upper())
 
+    # Join with spaces
+    cleaned_string = ' '.join(cleaned_tokens)
+    
+    # Cosmetic cleanup: fix spaces around brackets
+    cleaned_string = cleaned_string.replace('( ', '(').replace(' )', ')')
+    
     return cleaned_string.strip()
 
 def generate_combinations(logic_string):
     if not logic_string: return ""
     try:
+        # Handle outer parentheses stripping if the whole string is enclosed
+        # (Simple check to match opening/closing)
         if logic_string.startswith('(') and logic_string.endswith(')'):
             depth = 0
             is_enclosed = True
@@ -59,8 +91,10 @@ def generate_combinations(logic_string):
 
         or_groups = []
         depth = 0
+        # Pad parentheses for splitting
         tokens = logic_string.replace('(', ' ( ').replace(')', ' ) ').split()
         temp_tokens = []
+        
         for token in tokens:
             if token == '(':
                 depth += 1
@@ -77,9 +111,12 @@ def generate_combinations(logic_string):
 
         final_lines = []
         for group in or_groups:
-            codes = re.findall(r'[A-Z]{3}_[A-Z0-9]+', group)
+            # UPDATE: Use the same strict regex for consistency (XXX_NN)
+            codes = re.findall(r'[A-Z0-9]{3}_\d{2}', group, re.IGNORECASE)
             if codes:
                 codes = sorted(list(set(codes))) 
+                # Normalize to Upper for the output combination
+                codes = [c.upper() for c in codes]
                 combination_line = "|".join(codes)
                 final_lines.append(combination_line)
         return "\n".join(final_lines)
@@ -93,6 +130,7 @@ def get_validation_data(combinations_str, results_list):
     if not combinations_str or not results_list:
         return []
 
+    # Map available codes from Excel results
     code_data = {item['matched_word'].upper(): item for item in results_list}
     validation_data = []
     
@@ -104,7 +142,9 @@ def get_validation_data(combinations_str, results_list):
         is_cdpo = True
         
         for code in codes:
+            # Check against the mapped data
             data = code_data.get(code.upper(), {})
+            # Logic: If ANY code in the line is NOT Y, the whole line fails that check
             if str(data.get('DPEO', 'N')).strip().upper() != 'Y':
                 is_dpeo = False
             if str(data.get('CDPO', 'N')).strip().upper() != 'Y':
@@ -153,9 +193,13 @@ def process_requests():
 
     msg.toast('Matching against database...', icon='🔍')
     
+    # Prepare comparison column (strip non-alphanumeric and lower)
     df['__COMPARE__'] = df[NOM_CF_COL].astype(str).str.strip().str.lower().apply(lambda x: re.sub(r'[^\w]', '', x))
+    
     all_raw_input_text = " ".join(input_list)
-    all_codes_in_input = re.findall(r'([A-Z]{3}_[A-Z0-9]+)', all_raw_input_text, re.IGNORECASE)
+    
+    # UPDATE: Use the strict regex here as well to only look up valid codes
+    all_codes_in_input = re.findall(r'([a-zA-Z0-9]{3}_\d{2})', all_raw_input_text)
     
     matched_data = {} 
     
@@ -384,7 +428,6 @@ with tab1:
                             st.info("No combinations to validate.")
 
                         # --- 2. Display Final Combination (Filtered) ---
-                        # UPDATED LOGIC: Include if valid (DPEO, CDPO, or Both)
                         st.markdown("**Final Combination:**")
                         final_lines = [
                             item['raw_line'] 
@@ -408,7 +451,8 @@ with tab1:
                             st.info("No valid combinations found (All lines were NOT APPLICABLE).")
 
                         # --- Matched Codes Table ---
-                        codes_in_this_input = {code.upper() for code in re.findall(r'([A-Z]{3}_\d+)', raw_input, re.IGNORECASE)}
+                        # UPDATE: Ensure regex here also matches the strict 2-digit rule
+                        codes_in_this_input = {code.upper() for code in re.findall(r'([a-zA-Z0-9]{3}_\d{2})', raw_input)}
                         df_group = pd.DataFrame([
                             res for res in results_list 
                             if res['matched_word'].upper() in codes_in_this_input
