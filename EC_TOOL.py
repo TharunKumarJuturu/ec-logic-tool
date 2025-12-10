@@ -6,7 +6,7 @@ import time
 
 # --- Configuration & Global Paths ---
 st.set_page_config(
-    page_title="My Test Tool", 
+    page_title="Logic Processor & EC Tool", 
     layout="wide", 
     page_icon="🚀",
     initial_sidebar_state="expanded"
@@ -29,14 +29,12 @@ def strict_clean_input(text):
     # 1. Start from the first open bracket '('
     start_index = text.find('(')
     if start_index == -1:
-        # If no bracket is found, return empty or handle as error depending on preference
-        # For now, we return empty string to indicate no valid logic found
         return ""
     
     # Slice the text to ignore "garbage" before the first bracket
     content_to_process = text[start_index:]
     
-    # 2. Define Regex Patterns based on roles
+    # 2. Define Regex Patterns
     # Codes: 3 alphanumeric chars + '_' + 2 digits (e.g., ABC_12, k1k_00)
     # Operators: (, ), , (comma), AND, OR (case insensitive)
     pattern = r"([a-zA-Z0-9]{3}_\d{2}|[()]|,|(?i:\b(?:and|or)\b))"
@@ -61,7 +59,7 @@ def strict_clean_input(text):
         elif token in ('(', ')'):
             cleaned_tokens.append(token)
             
-        # Keep Codes (Normalize to Uppercase for consistency with Excel matching)
+        # Keep Codes (Normalize to Uppercase)
         else:
             cleaned_tokens.append(token.upper())
 
@@ -75,9 +73,17 @@ def strict_clean_input(text):
 
 def generate_combinations(logic_string):
     if not logic_string: return ""
+    
+    # --- SAFETY CHECK: Detect Unbalanced Parentheses ---
+    open_count = logic_string.count('(')
+    close_count = logic_string.count(')')
+    
+    if open_count != close_count:
+        return f"⚠️ Error: Unbalanced Parentheses. Opened: {open_count}, Closed: {close_count}. Please check your input."
+    # ---------------------------------------------------
+
     try:
         # Handle outer parentheses stripping if the whole string is enclosed
-        # (Simple check to match opening/closing)
         if logic_string.startswith('(') and logic_string.endswith(')'):
             depth = 0
             is_enclosed = True
@@ -111,7 +117,7 @@ def generate_combinations(logic_string):
 
         final_lines = []
         for group in or_groups:
-            # UPDATE: Use the same strict regex for consistency (XXX_NN)
+            # STRICT REGEX: Matches codes like ABC_12
             codes = re.findall(r'[A-Z0-9]{3}_\d{2}', group, re.IGNORECASE)
             if codes:
                 codes = sorted(list(set(codes))) 
@@ -134,6 +140,10 @@ def get_validation_data(combinations_str, results_list):
     code_data = {item['matched_word'].upper(): item for item in results_list}
     validation_data = []
     
+    # If the combination string is actually an error message, don't try to split it
+    if combinations_str.startswith("⚠️") or combinations_str.startswith("Error"):
+        return []
+
     for line in combinations_str.split('\n'):
         if not line.strip(): continue
         
@@ -144,7 +154,6 @@ def get_validation_data(combinations_str, results_list):
         for code in codes:
             # Check against the mapped data
             data = code_data.get(code.upper(), {})
-            # Logic: If ANY code in the line is NOT Y, the whole line fails that check
             if str(data.get('DPEO', 'N')).strip().upper() != 'Y':
                 is_dpeo = False
             if str(data.get('CDPO', 'N')).strip().upper() != 'Y':
@@ -176,7 +185,14 @@ def get_validation_data(combinations_str, results_list):
     return validation_data
 
 def add_new_request():
+    # Sync current widget values to the list before appending
+    for i in range(len(st.session_state.request_fields)):
+        key = f"request_{i}"
+        if key in st.session_state:
+            st.session_state.request_fields[i] = st.session_state[key]
+            
     st.session_state.request_fields.append('') 
+    st.session_state['processed_requests'] = None 
     st.session_state['comparison_results'] = None
 
 def process_requests():
@@ -193,12 +209,12 @@ def process_requests():
 
     msg.toast('Matching against database...', icon='🔍')
     
-    # Prepare comparison column (strip non-alphanumeric and lower)
+    # Prepare comparison column
     df['__COMPARE__'] = df[NOM_CF_COL].astype(str).str.strip().str.lower().apply(lambda x: re.sub(r'[^\w]', '', x))
     
     all_raw_input_text = " ".join(input_list)
     
-    # UPDATE: Use the strict regex here as well to only look up valid codes
+    # STRICT REGEX: Only extract codes matching the XXX_NN pattern for lookup
     all_codes_in_input = re.findall(r'([a-zA-Z0-9]{3}_\d{2})', all_raw_input_text)
     
     matched_data = {} 
@@ -273,47 +289,107 @@ initialize_session()
 # --- MODERN UI STYLING (Soft UI) ---
 st.markdown("""
 <style>
-    /* Global Background */
-    .stApp { background-color: #f8f9fa; }
+    /* Global Settings & Font */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     
-    /* Card Style */
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+    
+    .stApp { 
+        background-color: #f1f5f9; /* Slate-100 */
+    }
+    
+    /* Premium Cards */
     .css-card {
         background-color: white;
-        padding: 2rem;
+        padding: 1.5rem;
         border-radius: 12px;
-        border: 1px solid #e0e0e0;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-        margin-bottom: 1.5rem;
-        transition: border-color 0.2s ease;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        margin-bottom: 1rem;
     }
-    .css-card:hover { border-color: #008080; }
-
+    
+    /* Headings */
+    h1, h2, h3 {
+        color: #0f172a; /* Slate-900 */
+        font-weight: 700;
+    }
+    
     /* Text Area */
     .stTextArea textarea {
         background-color: #ffffff; 
-        border: 1px solid #d1d5db; 
+        border: 1px solid #cbd5e1; 
         border-radius: 8px;
-        font-family: 'Consolas', 'Courier New', monospace; 
-        font-size: 14px;
+        font-family: 'JetBrains Mono', 'Consolas', monospace; 
+        font-size: 13px;
+        color: #334155;
     }
-    .stTextArea textarea:focus { border-color: #008080; box-shadow: 0 0 0 1px #008080; }
+    .stTextArea textarea:focus { 
+        border-color: #3b82f6; /* Blue-500 */
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2); 
+    }
 
-    /* Buttons */
-    .stButton > button {
-        background-color: #008080; color: white; border-radius: 8px; 
-        font-weight: 600; border: none; padding: 0.5rem 1rem;
+    /* Primary Button (Process) */
+    div.stButton > button[kind="primary"] {
+        background-color: #2563eb; /* Blue-600 */
+        color: white; 
+        border-radius: 8px; 
+        font-weight: 600; 
+        border: none; 
+        padding: 0.6rem 1.2rem;
+        width: 100%;
+        transition: all 0.2s;
     }
-    .stButton > button:hover { background-color: #006666; }
+    div.stButton > button[kind="primary"]:hover { 
+        background-color: #1d4ed8; /* Blue-700 */
+        box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.3);
+    }
 
     /* Add Button */
-    div[data-testid="stVerticalBlock"] > div > div:nth-child(2) > div > button {
-        margin-top: 32px; background-color: #4CAF50; width: 42px; height: 42px;
-        border-radius: 50%; font-size: 1.5rem; line-height: 1; padding: 0;
+    button[key="add_button"] {
+        background-color: #10b981; /* Emerald-500 */
+        color: white;
+        border-radius: 50%;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        line-height: 1;
     }
 
+    /* Metrics */
+    div[data-testid="stMetricValue"] {
+        font-size: 1.5rem;
+        color: #0f172a;
+    }
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.875rem;
+        color: #64748b;
+    }
+    
     /* Sidebar */
-    .stFileUploader { 
-        border: 2px dashed #008080; border-radius: 10px; background-color: #f0fdfa; padding: 10px;
+    section[data-testid="stSidebar"] {
+        background-color: #ffffff;
+        border-right: 1px solid #e2e8f0;
+    }
+    
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 2px;
+        background-color: transparent;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: transparent;
+        border-radius: 4px;
+        color: #64748b;
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: white;
+        color: #2563eb;
+        border-bottom: 2px solid #2563eb;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -333,55 +409,104 @@ with st.sidebar:
     else:
         st.info("ℹ️ Awaiting File Upload")
 
-# --- HEADER ---
-st.title("🚀 Logic Processor & EC Tool")
+# --- HEADER & STATUS BAR ---
+# Top-level status metrics to give immediate context
+row_header = st.container()
+with row_header:
+    col_title, col_m1, col_m2, col_m3 = st.columns([0.4, 0.2, 0.2, 0.2])
+    
+    with col_title:
+        st.title("🚀 Logic Processor")
+        st.markdown("*Advanced EC Validation Tool*")
+        
+    # Metrics
+    if not st.session_state['extracted_data'].empty:
+        df = st.session_state['extracted_data']
+        col_m1.metric("📚 File Status", "Loaded", f"{len(df)} rows")
+    else:
+        col_m1.metric("📚 File Status", "Waiting", "Upload .xlsm", delta_color="off")
 
-# --- Main Layout ---
-tab1, tab2 = st.tabs(["**Dynamic Inputs**", "**Reference Data**"])
+    active_reqs = len([r for r in st.session_state.request_fields if r.strip()])
+    col_m2.metric("📝 Active Requests", active_reqs)
+    
+    # Check match count if processed
+    if st.session_state.comparison_results and isinstance(st.session_state.comparison_results, list):
+        col_m3.metric("🔍 Matches Found", len(st.session_state.comparison_results))
+    else:
+        col_m3.metric("🔍 Matches Found", "-", delta_color="off")
 
-# --- TAB 1: Inputs and Processing ---
-with tab1:
+st.markdown("---")
+
+# --- SPLIT LAYOUT: COMMAND CENTER ---
+col_left, col_right = st.columns([0.35, 0.65], gap="large")
+
+# --- LEFT COLUMN: INPUTS (Control Panel) ---
+with col_left:
+    st.markdown("### 🛠️ Input Console")
     st.markdown('<div class="css-card">', unsafe_allow_html=True)
-    st.subheader("📝 Request Definitions")
+    st.caption("Define logic strings to validate against the referenced EC data.")
     
     for i in range(len(st.session_state.request_fields)):
-        col_req, col_add = st.columns([0.92, 0.08])
-        widget_label = f"REQUEST #{i + 1}"
-        with col_req:
+        c1, c2 = st.columns([0.85, 0.15])
+        with c1:
             st.session_state.request_fields[i] = st.text_area(
-                label=widget_label, value=st.session_state.request_fields[i],
-                height=80, key=f"request_{i}", placeholder="Example: HP-0000873[...]"
+                label=f"Request #{i + 1}",
+                value=st.session_state.request_fields[i],
+                height=100,
+                key=f"request_{i}",
+                placeholder="HP-0000873 [ ... ] AND ( ... )",
+                label_visibility="collapsed" if i > 0 else "visible"
             )
+        # Show Add button only on the last item for flow
         if i == len(st.session_state.request_fields) - 1:
-            with col_add:
-                st.button("+", on_click=add_new_request, key="add_button", help="Add another request field")
+            with c2:
+                # Spacer to align button
+                st.write("") 
+                st.write("")
+                st.button("＋", on_click=add_new_request, key="add_button", help="Add another request")
     
     st.markdown("<br>", unsafe_allow_html=True)
-    st.button("⚡ Process Information", on_click=process_requests, key="process_button", type="primary")
+    
+    # Process Button (Sticky-ish relative to card)
+    st.button("⚡ Run Analysis", on_click=process_requests, key="process_button", type="primary")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- Results Display with TABS ---
-    if st.session_state.processed_requests is not None and not st.session_state['extracted_data'].empty:
-        
-        # Summary Metrics
-        results_list = st.session_state.comparison_results
-        if isinstance(results_list, list):
-            valid_req_count = len([r for r in st.session_state.processed_requests if r.strip() != ''])
-            total_matches = len(results_list)
-            
-            st.markdown('<div class="css-card">', unsafe_allow_html=True)
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Requests Processed", valid_req_count)
-            m2.metric("Unique Codes Found", total_matches)
-            m3.metric("Status", "Complete", delta="Success", delta_color="normal")
-            st.markdown('</div>', unsafe_allow_html=True)
+    # Reference Data "Mini-View" Option could go here if needed, but keeping it simple for now
+    with st.expander("📌 Quick Stats"):
+        if not st.session_state['extracted_data'].empty:
+            st.write(f"Columns: {list(st.session_state['extracted_data'].columns)}")
+        else:
+            st.write("No data loaded.")
 
-        st.markdown('<div class="css-card">', unsafe_allow_html=True)
-        st.subheader("📊 Processing Results")
+
+# --- RIGHT COLUMN: RESULTS DECK ---
+with col_right:
+    # 1. EMPTY STATE (When no processing has happened)
+    if st.session_state.processed_requests is None:
+        st.markdown('<div class="css-card" style="text-align: center; padding: 4rem;">', unsafe_allow_html=True)
+        st.markdown("# 👋 Ready to Start")
+        st.markdown("Enter your logic strings in the panel on the left and click **Run Analysis**.")
+        st.markdown("Results will appear here instantly.")
+        st.markdown('</div>', unsafe_allow_html=True)
         
+        # Show Data Preview if file is loaded but no request processed
+        if not st.session_state['extracted_data'].empty:
+             st.subheader("📚 Reference Data Preview")
+             st.dataframe(st.session_state['extracted_data'].head(50), use_container_width=True)
+
+    # 2. RESULTS STATE
+    else:
+        st.markdown("### 📊 Analysis Results")
+        
+        # Error/Info Handling
+        results_list = st.session_state.comparison_results
         if isinstance(results_list, dict):
-            if 'error' in results_list: st.error(results_list['error'])
-            elif 'info' in results_list: st.info(results_list['info'])
+            if 'error' in results_list: 
+                st.error(results_list['error'])
+            elif 'info' in results_list: 
+                st.info(results_list['info'])
+        
+        # Valid Results Tabs
         else:
             valid_requests = []
             for idx, req in enumerate(st.session_state.processed_requests):
@@ -389,129 +514,94 @@ with tab1:
                     valid_requests.append((idx + 1, req))
 
             if valid_requests:
-                result_tabs = st.tabs([f"Request #{idx}" for idx, _ in valid_requests])
-
-                for tab_obj, (req_idx, raw_input) in zip(result_tabs, valid_requests):
+                # Use Tabs for multiple requests
+                tabs = st.tabs([f"Request #{n}" for n, _ in valid_requests])
+                
+                for tab_obj, (req_idx, raw_input) in zip(tabs, valid_requests):
                     with tab_obj:
-                        st.markdown(f"#### Analysis for Request #{req_idx}")
-                        col_out, col_comb = st.columns(2)
+                        st.markdown('<div class="css-card">', unsafe_allow_html=True)
                         
+                        # --- Processing Logic ---
                         cleaned_output = strict_clean_input(raw_input)
                         generated_combinations = generate_combinations(cleaned_output)
                         validation_data = get_validation_data(generated_combinations, results_list)
 
-                        with col_out:
-                            st.markdown("**Cleaned Logic Output:**")
-                            st.info(cleaned_output)
-                        
-                        with col_comb:
-                            st.markdown("**Generated Combinations:**")
-                            st.code(generated_combinations, language="text")
+                        # Top Summary for this Request
+                        c_summ1, c_summ2 = st.columns(2)
+                        with c_summ1:
+                            st.caption("Cleaned Logic")
+                            st.code(cleaned_output if cleaned_output else "No logic found", language="text")
+                        with c_summ2:
+                            st.caption("Generated Combinations")
+                            if generated_combinations.startswith("⚠️"):
+                                st.error(generated_combinations)
+                            else:
+                                st.code(generated_combinations, language="text")
 
-                        # --- 1. Display Combination Validation (Badge Style) ---
-                        st.markdown("**Combination Validation:**")
+                        st.markdown("---")
+                        
+                        # Validation Badges
+                        st.markdown("**✅ Combination Validation**")
                         if validation_data:
-                            html_badges = '<div style="font-family: monospace; white-space: pre; line-height: 1.6;">'
+                            html_badges = '<div style="font-family: monospace; white-space: pre; line-height: 1.6; display: flex; flex-direction: column; gap: 4px;">'
                             for item in validation_data:
-                                bg_color = "#e6fffa" if item['is_valid'] else "#fff5f5"
-                                border_color = "#009933" if item['is_valid'] else "#cc0000"
-                                text_color = "#006622" if item['is_valid'] else "#990000"
+                                bg_color = "#ecfdf5" if item['is_valid'] else "#fef2f2" # Emerald-50 / Rose-50
+                                border_color = "#10b981" if item['is_valid'] else "#ef4444" # Emerald-500 / Rose-500
+                                text_color = "#065f46" if item['is_valid'] else "#991b1b"
+                                icon = "✅" if item['is_valid'] else "⛔"
                                 
                                 html_badges += (
                                     f'<div style="background-color: {bg_color}; border-left: 4px solid {border_color}; '
-                                    f'padding: 4px 10px; margin-bottom: 2px; color: {text_color}; border-radius: 4px;">'
-                                    f'{item["display_text"]}</div>'
+                                    f'padding: 8px 12px; color: {text_color}; border-radius: 4px; font-size: 0.9rem;">'
+                                    f'<b>{icon}</b> {item["display_text"]}</div>'
                                 )
                             html_badges += '</div>'
                             st.markdown(html_badges, unsafe_allow_html=True)
                         else:
                             st.info("No combinations to validate.")
 
-                        # --- 2. Display Final Combination (Filtered) ---
-                        st.markdown("**Final Combination:**")
-                        final_lines = [
-                            item['raw_line'] 
-                            for item in validation_data 
-                            if item['is_valid']
-                        ]
-                        
-                        col_text, col_dl = st.columns([0.85, 0.15])
+                        st.markdown("<br>", unsafe_allow_html=True)
+
+                        # Final Download
+                        final_lines = [item['raw_line'] for item in validation_data if item['is_valid']]
                         if final_lines:
                             final_text = "\n".join(final_lines)
-                            with col_text:
-                                st.code(final_text, language="text")
-                            with col_dl:
-                                st.download_button(
-                                    label="📥 Download",
-                                    data=final_text,
-                                    file_name=f"request_{req_idx}_final.txt",
-                                    mime="text/plain"
-                                )
-                        else:
-                            st.info("No valid combinations found (All lines were NOT APPLICABLE).")
-
-                        # --- Matched Codes Table ---
-                        # UPDATE: Ensure regex here also matches the strict 2-digit rule
-                        codes_in_this_input = {code.upper() for code in re.findall(r'([a-zA-Z0-9]{3}_\d{2})', raw_input)}
-                        df_group = pd.DataFrame([
-                            res for res in results_list 
-                            if res['matched_word'].upper() in codes_in_this_input
-                        ]).drop_duplicates(subset=['matched_word'])
-
-                        if not df_group.empty:
-                            st.markdown("**Matched Codes Detail:**")
-                            df_visual = df_group.copy()
-                            for col in ['NEA', 'DPEO', 'CDPO']:
-                                df_visual[col] = df_visual[col].astype(str).str.strip().str.upper() == 'Y'
-
-                            st.dataframe(
-                                df_visual,
-                                width="stretch",
-                                column_config={
-                                    "matched_word": st.column_config.TextColumn("Nom CF / Nom CO PLM (CF_CO)"),
-                                    "functional_codification": st.column_config.TextColumn("Replacement codes"),
-                                    "NEA": st.column_config.CheckboxColumn("NEA", width="small"),
-                                    "DPEO": st.column_config.CheckboxColumn("DPEO", width="small"),
-                                    "CDPO": st.column_config.CheckboxColumn("CDPO", width="small"),
-                                },
-                                hide_index=True
+                            st.download_button(
+                                label="📥 Download Valid Combinations",
+                                data=final_text,
+                                file_name=f"request_{req_idx}_final.txt",
+                                mime="text/plain",
+                                help="Download only the valid DPEO/CDPO combinations"
                             )
-                        else:
-                            st.warning(f"No valid codes found matching the reference data for Request #{req_idx}")
-                            
+                        
+                        st.markdown('</div>', unsafe_allow_html=True)
+
+                        # Matched Codes Details (Accordion style to save space)
+                        with st.expander("🔎 View Matched Codes Details", expanded=False):
+                            codes_in_this_input = {code.upper() for code in re.findall(r'([a-zA-Z0-9]{3}_\d{2})', raw_input)}
+                            df_group = pd.DataFrame([
+                                res for res in results_list 
+                                if res['matched_word'].upper() in codes_in_this_input
+                            ]).drop_duplicates(subset=['matched_word'])
+
+                            if not df_group.empty:
+                                df_visual = df_group.copy()
+                                for col in ['NEA', 'DPEO', 'CDPO']:
+                                    df_visual[col] = df_visual[col].astype(str).str.strip().str.upper() == 'Y'
+
+                                st.dataframe(
+                                    df_visual,
+                                    use_container_width=True,
+                                    column_config={
+                                        "matched_word": st.column_config.TextColumn("Code"),
+                                        "functional_codification": st.column_config.TextColumn("Replacement"),
+                                        "NEA": st.column_config.CheckboxColumn("NEA"),
+                                        "DPEO": st.column_config.CheckboxColumn("DPEO"),
+                                        "CDPO": st.column_config.CheckboxColumn("CDPO"),
+                                    },
+                                    hide_index=True
+                                )
+                            else:
+                                st.warning("No reference codes found in this request.")
             else:
-                st.info("No text entered in any request fields.")
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    elif st.session_state.comparison_results is not None:
-        if isinstance(st.session_state.comparison_results, dict):
-             st.info(st.session_state.comparison_results['info'])
-
-# --- TAB 2: Database View ---
-with tab2:
-    st.markdown('<div class="css-card">', unsafe_allow_html=True)
-    st.subheader("📚 Extracted Reference Data")
-    if not st.session_state['extracted_data'].empty:
-        df_display = st.session_state['extracted_data']
-        df_view = df_display.copy()
-        cols_to_map = ['Used before NEA', 'Used from DPEO', 'Used from CDPO']
-        for col in cols_to_map:
-            if col in df_view.columns:
-                df_view[col] = df_view[col].astype(str).str.strip().str.upper() == 'Y'
-
-        st.markdown(f"**Total Records:** `{len(df_display)}` | **Columns:** `{df_display.shape[1]}`")
-        st.dataframe(
-            df_view, 
-            width="stretch", 
-            height=600,
-            column_config={
-                "Used before NEA": st.column_config.CheckboxColumn("NEA", width="small"),
-                "Used from DPEO": st.column_config.CheckboxColumn("DPEO", width="small"),
-                "Used from CDPO": st.column_config.CheckboxColumn("CDPO", width="small"),
-            }
-        )
-        st.caption(f"Local Cache: {FILE_PATH}")
-    else:
-        st.warning("No data extracted. Upload a file in the sidebar to view content.")
-    st.markdown('</div>', unsafe_allow_html=True)
+                st.info("No input text detected.")
